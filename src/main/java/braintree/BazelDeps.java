@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -11,6 +13,7 @@ import java.util.Set;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 
+import java.util.function.Predicate;
 import org.eclipse.aether.artifact.Artifact;
 import org.eclipse.aether.artifact.DefaultArtifact;
 import org.eclipse.aether.collection.DependencyCollectionException;
@@ -68,11 +71,34 @@ public class BazelDeps {
 
   private void printWorkspace(Map<Artifact, Set<Artifact>> dependencies,
                               Set<Artifact> excludeDependencies) {
+
     System.out.println("\n\n--------- Add these lines to your WORKSPACE file ---------\n");
     dependencies.values().stream()
       .flatMap(Collection::stream)
       .filter(artifact -> !excludeDependencies.contains(artifact))
-      .sorted(Comparator.comparing(Artifact::getArtifactId))
+      // Sort by both id and version so latest version comes first
+      .sorted(new Comparator<Artifact>() {
+        @Override
+        public int compare(Artifact o1, Artifact o2) {
+          int idCompare = o1.getArtifactId().compareTo(o2.getArtifactId());
+          if (idCompare == 0) {
+            return o2.getVersion().compareTo(o1.getVersion());
+          } else {
+            return idCompare;
+          }
+        }
+      })
+      // Only take latest version
+      .filter(new Predicate<Artifact>() {
+        private Set<String> seen = new HashSet<String>();
+        @Override
+        public boolean test(Artifact artifact) {
+          String key = artifact.getGroupId() + ":" + artifact.getArtifactId();
+          boolean result = seen.contains(key);
+          seen.add(key);
+          return !result;
+        }
+      })
       .forEach(artifact -> {
         System.out.format("maven_jar(name = \"%s\", artifact = \"%s\")\n", artifactName(artifact),
                           artifact.toString());
@@ -104,7 +130,7 @@ public class BazelDeps {
   }
 
   private static String artifactName(Artifact artifact) {
-    return sanitizeName(artifact.getGroupId()) + "_" + sanitizeName(artifact.getArtifactId()) + "_" + sanitizeName(artifact.getVersion());
+    return sanitizeName(artifact.getGroupId()) + "_" + sanitizeName(artifact.getArtifactId());
   }
 
   private static String sanitizeName(String name) {
